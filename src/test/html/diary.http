@@ -1,8 +1,8 @@
 ### createDiary
-POST http://localhost:8080/create/diary?date=2022-05-24
+POST http://localhost:8080/create/diary?date=2023-12-03
 Content-Type: application/json
 
-too bad
+오늘 일기
 
 ### readDiary
 GET http://localhost:8080/read/diary?date=sdfg
