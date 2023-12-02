@@ -1,12 +1,19 @@
 package com.zerobase.weather.service;
 
+import com.zerobase.weather.WeatherApplication;
+import com.zerobase.weather.domain.DateWeather;
 import com.zerobase.weather.domain.Diary;
+import com.zerobase.weather.error.InvalidDate;
+import com.zerobase.weather.repository.DateWeatherRepository;
 import com.zerobase.weather.repository.DiaryRepository;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,18 +28,29 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@Transactional(readOnly = true)
 public class DiaryService {
     @Value("${openweathermap.key}")
     private String apiKey;
 
     private final DiaryRepository diaryRepository;
+    private final DateWeatherRepository dateWeatherRepository;
 
-    public DiaryService(DiaryRepository diaryRepository) {
+    private static final Logger logger = LoggerFactory.getLogger(WeatherApplication.class);
+
+    public DiaryService(DiaryRepository diaryRepository,
+                        DateWeatherRepository dateWeatherRepository) {
         this.diaryRepository = diaryRepository;
+        this.dateWeatherRepository = dateWeatherRepository;
     }
 
-    @Transactional(isolation = Isolation.SERIALIZABLE)
-    public void createDiary(LocalDate date, String text) {
+    @Transactional
+    @Scheduled(cron = "0 0 1 * * *")
+    public void saveWeatherDate() {
+        dateWeatherRepository.save(getWeatherFromApi());
+    }
+
+    private DateWeather getWeatherFromApi() {
         // api에서 데이터 받아오기
         String weatherData = getWeatherString();
 
@@ -40,18 +58,44 @@ public class DiaryService {
         Map<String, Object> parsedWeather = parseWeather(weatherData);
 
         // db에 저장
+        DateWeather dateWeather = new DateWeather();
+        dateWeather.setDate(LocalDate.now());
+        dateWeather.setWeather(parsedWeather.get("main").toString());
+        dateWeather.setIcon(parsedWeather.get("icon").toString());
+        dateWeather.setTemperature((Double) parsedWeather.get("temp"));
+
+        return dateWeather;
+    }
+
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public void createDiary(LocalDate date, String text) {
+        logger.info("started to create diary");
+        // 날씨 데이터 가져오기 (DB에서 가져오기)
+        DateWeather dateWeather = getDateWeather(date);
+
+        // db에 저장
         Diary nowDiary = new Diary();
-        nowDiary.setWeather(parsedWeather.get("main").toString());
-        nowDiary.setIcon(parsedWeather.get("icon").toString());
-        nowDiary.setTemperature((Double) parsedWeather.get("temp"));
+        nowDiary.setDateWeather(dateWeather);
         nowDiary.setText(text);
-        nowDiary.setDate(date);
 
         diaryRepository.save(nowDiary);
+        logger.info("end to create diary");
+    }
+
+    private DateWeather getDateWeather(LocalDate date) {
+        List<DateWeather> dateWeatherListFromDB = dateWeatherRepository.findAllByDate(date);
+        if (dateWeatherListFromDB.isEmpty()) {
+            return getWeatherFromApi();
+        } else {
+            return dateWeatherListFromDB.get(0);
+        }
     }
 
     @Transactional(readOnly = true)
     public List<Diary> readDiary(LocalDate date) {
+//        if (date.isAfter(LocalDate.ofYearDay(3050, 1))) {
+//            throw new InvalidDate();
+//        }
         return diaryRepository.findAllByDate(date);
     }
 
